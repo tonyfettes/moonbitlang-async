@@ -36,7 +36,7 @@ fn kill_process(pid : Int) = "moonbitlang/async" "process/kill"
 pub(all) struct CancellationHandler(async (Int) -> Unit)
 
 ///|
-#cfg(all(target="native", platform="windows"))
+#cfg(platform="windows")
 fn default_signal() -> @signal.Signal {
   SIGBREAK
 }

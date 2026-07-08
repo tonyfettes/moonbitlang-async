@@ -104,7 +104,7 @@ pub fn set_global_cancellation_signals(signals : ReadOnlyArray[Int]) -> Unit {
 }
 
 ///|
-#cfg(any(target="wasm", all(target="native", not(platform="windows"))))
+#cfg(not(platform="windows"))
 fn setup_sigwait_signal_handler() -> @coroutine.Coroutine {
   if !global_signal_handler_initialized.val {
     set_global_cancellation_signals(all_signals)
@@ -122,7 +122,7 @@ fn setup_sigwait_signal_handler() -> @coroutine.Coroutine {
 }
 
 ///|
-#cfg(any(target="wasm", all(target="native", not(platform="windows"))))
+#cfg(not(platform="windows"))
 async fn EventLoop::terminate_sigwait_signal_handler(
   evloop : EventLoop,
   sigwait_task : @coroutine.Coroutine,
@@ -138,7 +138,7 @@ async fn EventLoop::terminate_sigwait_signal_handler(
 }
 
 ///|
-#cfg(all(target="native", platform="windows"))
+#cfg(platform="windows")
 extern "C" fn set_console_control_handler(add : Int) -> Int = "moonbitlang_async_set_console_control_handler"
 
 ///|
@@ -147,7 +147,7 @@ extern "C" fn set_console_control_handler(add : Int) -> Int = "moonbitlang_async
 fn set_console_control_handler(add : Int) -> Int = "moonbitlang/async" "signal/set_console_control_handler"
 
 ///|
-#cfg(any(target="wasm", all(target="native", platform="windows")))
+#cfg(any(target="wasm", platform="windows"))
 fn setup_console_control_signal_handler() -> Unit raise {
   if !global_signal_handler_initialized.val {
     set_global_cancellation_signals(all_signals)
@@ -158,7 +158,7 @@ fn setup_console_control_signal_handler() -> Unit raise {
 }
 
 ///|
-#cfg(any(target="wasm", all(target="native", platform="windows")))
+#cfg(any(target="wasm", platform="windows"))
 fn EventLoop::terminate_console_control_signal_handler(
   evloop : EventLoop,
 ) -> Unit raise {
@@ -186,13 +186,13 @@ async fn EventLoop::terminate_signal_handler(
 }
 
 ///|
-#cfg(all(target="native", platform="windows"))
+#cfg(platform="windows")
 fn setup_signal_handler() -> Unit raise {
   setup_console_control_signal_handler()
 }
 
 ///|
-#cfg(all(target="native", platform="windows"))
+#cfg(platform="windows")
 fn EventLoop::terminate_signal_handler(
   evloop : EventLoop,
   _ : Unit,

@@ -458,6 +458,52 @@ fn serialized_env(extra_env : Map[String, String]) -> String {
 
 ///|
 #cfg(target="wasm")
+fn StringBuilder::write_arg_with_windows_escape(
+  builder : StringBuilder,
+  arg : StringView,
+) -> Unit {
+  let need_quote = for char in arg {
+    if char is (' ' | '\t' | '"') {
+      break true
+    }
+  } nobreak {
+    false
+  }
+  if !need_quote {
+    builder.write_stringview(arg)
+    return
+  }
+  let mut segment_start = 0
+  let mut index = 0
+  let mut trailing_backslash = 0
+  fn flush(skip : Int) {
+    if index > segment_start {
+      builder.write_stringview(arg[segment_start:index - trailing_backslash])
+      if trailing_backslash > 0 {
+        builder.write_string(String::make(trailing_backslash * 2, '\\'))
+      }
+      segment_start = index + skip
+    }
+  }
+
+  builder.write_char('"')
+  while index < arg.length() {
+    match arg.code_unit_at(index) {
+      '"' => {
+        flush(1)
+        builder <+ "\\\""
+      }
+      '\\' => trailing_backslash += 1
+      _ => trailing_backslash = 0
+    }
+    index += 1
+  }
+  flush(0)
+  builder.write_char('"')
+}
+
+///|
+#cfg(target="wasm")
 async fn raw_spawn(
   cmd : StringView,
   args : ArrayView[String],
@@ -472,12 +518,6 @@ async fn raw_spawn(
   context~ : String,
 ) -> @event_loop.Process {
   check_process_arguments(cmd, args, extra_env, cwd)
-  let cmd = @os_string.encode(cmd)
-  let cwd = match cwd {
-    None => None
-    Some(cwd) => Some(@os_string.encode(cwd))
-  }
-  let args = @utf8.encode(serialized_args(args))
   let env = @utf8.encode(serialized_env(extra_env))
   defer {
     if stdin is Some(p) {
@@ -502,19 +542,48 @@ async fn raw_spawn(
     Some(pipe) => pipe.fd()
     None => @fd_util.invalid_fd
   }
-  @event_loop.spawn(
-    cmd,
-    args,
-    args_len=args.length(),
-    env~,
-    env_len=env.length(),
-    inherit_env~,
-    stdin~,
-    stdout~,
-    stderr~,
-    cwd~,
-    no_console_window~,
-    is_orphan~,
-    context~,
-  )
+  let cwd = match cwd {
+    None => None
+    Some(cwd) => Some(@os_string.encode(cwd))
+  }
+  if @event_loop.platform is Windows {
+    let cmd = match cmd {
+      [.., '.', 'e' | 'E', 'x' | 'X', 'e' | 'E']
+      | [.., '.', 'c' | 'C', 'o' | 'O', 'm' | 'M'] => cmd
+      _ => cmd + ".exe"
+    }
+    let command_line = StringBuilder::new()
+    command_line.write_arg_with_windows_escape(cmd)
+    for arg in args {
+      command_line..write_char(' ').write_arg_with_windows_escape(arg)
+    }
+    @event_loop.spawn_windows(
+      @os_string.encode(command_line.to_string()),
+      env~,
+      env_len=env.length(),
+      inherit_env~,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd~,
+      no_console_window~,
+      is_orphan~,
+      context~,
+    )
+  } else {
+    let args = @utf8.encode(serialized_args(args))
+    @event_loop.spawn_unix(
+      @os_string.encode(cmd),
+      args,
+      args_len=args.length(),
+      env~,
+      env_len=env.length(),
+      inherit_env~,
+      stdin~,
+      stdout~,
+      stderr~,
+      cwd~,
+      context~,
+    )
+  }
 }

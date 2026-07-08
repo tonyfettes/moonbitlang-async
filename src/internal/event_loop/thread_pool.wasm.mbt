@@ -532,7 +532,7 @@ priv struct SpawnJob(Job)
 ///|
 #unsafe_skip_stub_check
 #borrow(path, args, env, cwd)
-fn JobHandle::spawn(
+fn JobHandle::spawn_unix(
   path : @os_string.OsString,
   path_len? : Int = path.to_string().length(),
   args : Bytes,
@@ -546,15 +546,63 @@ fn JobHandle::spawn(
   cwd~ : @os_string.OsString,
   cwd_len? : Int = cwd.to_string().length(),
   has_cwd~ : Bool,
-  no_console_window~ : Bool,
-  is_orphan~ : Bool,
-) -> JobHandle = "moonbitlang/async" "thread_pool/make_spawn_job"
+) -> JobHandle = "moonbitlang/async" "thread_pool/make_spawn_job/unix"
 
 ///|
-fn Job::spawn(
+fn Job::spawn_unix(
   path : @os_string.OsString,
   args : Bytes,
   args_len~ : Int,
+  env~ : Bytes,
+  env_len~ : Int,
+  inherit_env~ : Bool,
+  stdin~ : @fd_util.Fd,
+  stdout~ : @fd_util.Fd,
+  stderr~ : @fd_util.Fd,
+  cwd~ : @os_string.OsString,
+  has_cwd~ : Bool,
+) -> SpawnJob {
+  SpawnJob(
+    Job(
+      JobHandle::spawn_unix(
+        path,
+        args,
+        args_len~,
+        env~,
+        env_len~,
+        inherit_env~,
+        stdin~,
+        stdout~,
+        stderr~,
+        cwd~,
+        has_cwd~,
+      ),
+    ),
+  )
+}
+
+///|
+#unsafe_skip_stub_check
+#borrow(command_line, env, cwd)
+fn JobHandle::spawn_windows(
+  command_line : @os_string.OsString,
+  command_line_len? : Int = command_line.to_string().length(),
+  env~ : Bytes,
+  env_len~ : Int,
+  inherit_env~ : Bool,
+  stdin~ : @fd_util.Fd,
+  stdout~ : @fd_util.Fd,
+  stderr~ : @fd_util.Fd,
+  cwd~ : @os_string.OsString,
+  cwd_len? : Int = cwd.to_string().length(),
+  has_cwd~ : Bool,
+  no_console_window~ : Bool,
+  is_orphan~ : Bool,
+) -> JobHandle = "moonbitlang/async" "thread_pool/make_spawn_job/windows"
+
+///|
+fn Job::spawn_windows(
+  command_line : @os_string.OsString,
   env~ : Bytes,
   env_len~ : Int,
   inherit_env~ : Bool,
@@ -568,10 +616,8 @@ fn Job::spawn(
 ) -> SpawnJob {
   SpawnJob(
     Job(
-      JobHandle::spawn(
-        path,
-        args,
-        args_len~,
+      JobHandle::spawn_windows(
+        command_line,
         env~,
         env_len~,
         inherit_env~,

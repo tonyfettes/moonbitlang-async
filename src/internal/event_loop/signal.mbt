@@ -63,20 +63,6 @@ pub suberror KilledBySignal {
 }
 
 ///|
-#cfg(target="wasm")
-fn signal_array_bytes(signals : ReadOnlyArray[Int]) -> Bytes {
-  let bytes = FixedArray::make(signals.length() * 4, b'\x00')
-  for index, signal in signals {
-    let offset = index * 4
-    bytes[offset] = signal.to_byte()
-    bytes[offset + 1] = (signal >> 8).to_byte()
-    bytes[offset + 2] = (signal >> 16).to_byte()
-    bytes[offset + 3] = (signal >> 24).to_byte()
-  }
-  bytes.unsafe_reinterpret_as_bytes()
-}
-
-///|
 #cfg(target="native")
 #borrow(all_signals, signals)
 extern "C" fn set_global_cancellation_signals_ffi(
@@ -89,9 +75,9 @@ extern "C" fn set_global_cancellation_signals_ffi(
 #unsafe_skip_stub_check
 #borrow(all_signals, signals)
 fn set_global_cancellation_signals_ffi(
-  all_signals : Bytes,
+  all_signals : ReadOnlyArray[Int],
   all_signals_len : Int,
-  signals : Bytes,
+  signals : ReadOnlyArray[Int],
   signals_len : Int,
 ) -> Unit = "moonbitlang/async" "signal/set_global_cancellation_signals"
 
@@ -109,12 +95,10 @@ pub fn set_global_cancellation_signals(signals : ReadOnlyArray[Int]) -> Unit {
 #cfg(target="wasm")
 pub fn set_global_cancellation_signals(signals : ReadOnlyArray[Int]) -> Unit {
   global_signal_handler_initialized.val = true
-  let all_signal_bytes = signal_array_bytes(all_signals)
-  let signal_bytes = signal_array_bytes(signals)
   set_global_cancellation_signals_ffi(
-    all_signal_bytes,
+    all_signals,
     all_signals.length(),
-    signal_bytes,
+    signals,
     signals.length(),
   )
 }

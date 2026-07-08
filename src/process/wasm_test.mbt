@@ -14,33 +14,65 @@
 // limitations under the License.
 
 ///|
-#cfg(not(platform="windows"))
+fn shell(command : String) -> (String, Array[String]) {
+  if @event_loop.platform is Windows {
+    ("powershell.exe", ["-NoProfile", "-Command", command])
+  } else {
+    ("/bin/sh", ["-c", command])
+  }
+}
+
+///|
+fn write_stdout_command(text : String) -> String {
+  if @event_loop.platform is Windows {
+    "[Console]::Out.Write('\{text}')"
+  } else {
+    "printf '\{text}'"
+  }
+}
+
+///|
+fn write_env_command(name : String) -> String {
+  if @event_loop.platform is Windows {
+    "[Console]::Out.Write($env:\{name})"
+  } else {
+    "printf \"$\{name}\""
+  }
+}
+
+///|
+fn list_directory_command() -> String {
+  if @event_loop.platform is Windows {
+    "Get-ChildItem -Name"
+  } else {
+    "ls"
+  }
+}
+
+///|
 async test "wasm collect stdout" {
-  let (code, output) = @process.collect_stdout("/bin/sh", [
-    "-c", "printf moonbit-process",
-  ])
+  let (cmd, args) = shell(write_stdout_command("moonbit-process"))
+  let (code, output) = @process.collect_stdout(cmd, args)
   inspect(code, content="0")
   inspect(output.text(), content="moonbit-process")
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "wasm pass env" {
-  let (code, output) = @process.collect_stdout(
-    "/bin/sh",
-    ["-c", "printf \"$MOONBIT_PROCESS_TEST\""],
-    extra_env={ "MOONBIT_PROCESS_TEST": "env-ok" },
-  )
+  let (cmd, args) = shell(write_env_command("MOONBIT_PROCESS_TEST"))
+  let (code, output) = @process.collect_stdout(cmd, args, extra_env={
+    "MOONBIT_PROCESS_TEST": "env-ok",
+  })
   inspect(code, content="0")
   inspect(output.text(), content="env-ok")
 }
 
 ///|
-#cfg(not(platform="windows"))
 async test "wasm set cwd" {
+  let (cmd, args) = shell(list_directory_command())
   let (code, output) = @process.collect_stdout(
-    "/bin/sh",
-    ["-c", "ls"],
+    cmd,
+    args,
     cwd="test_directory",
     extra_env={ "LC_ALL": "C" },
   )
@@ -53,4 +85,13 @@ async test "wasm set cwd" {
     .to_array()
   files.sort()
   json_inspect(files, content=["file", "inner1"])
+}
+
+///|
+async test "wasm reject nul argument" {
+  try @process.run("bad\u{0}cmd", []) catch {
+    _ => inspect(true, content="true")
+  } noraise {
+    _ => fail("expected process argument validation to fail")
+  }
 }

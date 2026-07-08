@@ -407,19 +407,37 @@ fn string_bytes_buffer(s : String) -> (@c_buffer.Buffer, Int) {
 }
 
 ///|
-#cfg(target="wasm")
-suberror InvalidProcessArgument {
+priv suberror InvalidProcessArgument {
   InteriorNul(String)
 } derive(Debug)
 
 ///|
-#cfg(target="wasm")
 fn check_no_nul(
   context : String,
   value : StringView,
 ) -> Unit raise InvalidProcessArgument {
   if value.find("\u{0}") is Some(_) {
     raise InteriorNul(context)
+  }
+}
+
+///|
+fn check_process_arguments(
+  cmd : StringView,
+  args : ArrayView[String],
+  extra_env : Map[String, String],
+  cwd : StringView?,
+) -> Unit raise InvalidProcessArgument {
+  check_no_nul("command", cmd)
+  for arg in args {
+    check_no_nul("argument", arg)
+  }
+  for k, v in extra_env {
+    check_no_nul("environment key", k)
+    check_no_nul("environment value", v)
+  }
+  if cwd is Some(cwd) {
+    check_no_nul("working directory", cwd)
   }
 }
 
@@ -462,17 +480,7 @@ async fn raw_spawn(
   is_orphan~ : Bool,
   context~ : String,
 ) -> @event_loop.Process {
-  check_no_nul("command", cmd)
-  for arg in args {
-    check_no_nul("argument", arg)
-  }
-  for k, v in extra_env {
-    check_no_nul("environment key", k)
-    check_no_nul("environment value", v)
-  }
-  if cwd is Some(cwd) {
-    check_no_nul("working directory", cwd)
-  }
+  check_process_arguments(cmd, args, extra_env, cwd)
   let cmd = @os_string.encode(cmd)
   let cwd = match cwd {
     None => None

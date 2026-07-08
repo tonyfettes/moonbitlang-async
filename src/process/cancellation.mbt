@@ -13,10 +13,22 @@
 // limitations under the License.
 
 ///|
+#cfg(not(target="wasm"))
 extern "C" fn terminate_process(pid : Int, signal : Int) = "moonbitlang_async_terminate_process"
 
 ///|
+#cfg(target="wasm")
+#unsafe_skip_stub_check
+fn terminate_process(pid : Int, signal : Int) = "moonbitlang/async" "process/terminate"
+
+///|
+#cfg(not(target="wasm"))
 extern "C" fn kill_process(pid : Int) = "moonbitlang_async_kill_process"
+
+///|
+#cfg(target="wasm")
+#unsafe_skip_stub_check
+fn kill_process(pid : Int) = "moonbitlang/async" "process/kill"
 
 ///|
 /// A handler function used to stop spawned process on cancellation.

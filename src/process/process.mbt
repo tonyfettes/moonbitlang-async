@@ -396,3 +396,128 @@ pub async fn collect_output_merged(
     (exit_code.wait(), output)
   }
 }
+
+///|
+#cfg(target="wasm")
+fn string_bytes_buffer(s : String) -> (@c_buffer.Buffer, Int) {
+  let bytes = @utf8.encode(s)
+  let buffer = @c_buffer.Buffer::new(bytes.length())
+  buffer.blit_from_bytes(src=bytes, len=bytes.length())
+  (buffer, bytes.length())
+}
+
+///|
+#cfg(target="wasm")
+suberror InvalidProcessArgument {
+  InteriorNul(String)
+} derive(Debug)
+
+///|
+#cfg(target="wasm")
+fn check_no_nul(
+  context : String,
+  value : StringView,
+) -> Unit raise InvalidProcessArgument {
+  if value.find("\u{0}") is Some(_) {
+    raise InteriorNul(context)
+  }
+}
+
+///|
+#cfg(target="wasm")
+fn serialized_args(args : ArrayView[String]) -> String {
+  let builder = StringBuilder::new()
+  for arg in args {
+    builder.write_string(arg)
+    builder.write_char('\u{0}')
+  }
+  builder.to_string()
+}
+
+///|
+#cfg(target="wasm")
+fn serialized_env(extra_env : Map[String, String]) -> String {
+  let builder = StringBuilder::new()
+  for k, v in extra_env {
+    builder.write_string(k)
+    builder.write_char('=')
+    builder.write_string(v)
+    builder.write_char('\u{0}')
+  }
+  builder.to_string()
+}
+
+///|
+#cfg(target="wasm")
+async fn raw_spawn(
+  cmd : StringView,
+  args : ArrayView[String],
+  extra_env~ : Map[String, String],
+  inherit_env~ : Bool,
+  stdin~ : &ProcessInput?,
+  stdout~ : &ProcessOutput?,
+  stderr~ : &ProcessOutput?,
+  cwd~ : StringView?,
+  no_console_window~ : Bool,
+  is_orphan~ : Bool,
+  context~ : String,
+) -> @event_loop.Process {
+  check_no_nul("command", cmd)
+  for arg in args {
+    check_no_nul("argument", arg)
+  }
+  for k, v in extra_env {
+    check_no_nul("environment key", k)
+    check_no_nul("environment value", v)
+  }
+  if cwd is Some(cwd) {
+    check_no_nul("working directory", cwd)
+  }
+  let cmd = @os_string.encode(cmd)
+  let cwd = match cwd {
+    None => None
+    Some(cwd) => Some(@os_string.encode(cwd))
+  }
+  let (args_buffer, args_len) = string_bytes_buffer(serialized_args(args))
+  defer args_buffer.free()
+  let (env, env_len) = string_bytes_buffer(serialized_env(extra_env))
+  defer env.free()
+  defer {
+    if stdin is Some(p) {
+      p.after_spawn()
+    }
+    if stdout is Some(p) {
+      p.after_spawn()
+    }
+    if stderr is Some(p) {
+      p.after_spawn()
+    }
+  }
+  let stdin = match stdin {
+    Some(pipe) => pipe.fd()
+    None => @fd_util.invalid_fd
+  }
+  let stdout = match stdout {
+    Some(pipe) => pipe.fd()
+    None => @fd_util.invalid_fd
+  }
+  let stderr = match stderr {
+    Some(pipe) => pipe.fd()
+    None => @fd_util.invalid_fd
+  }
+  @event_loop.spawn(
+    cmd,
+    args_buffer,
+    args_len~,
+    env~,
+    env_len~,
+    inherit_env~,
+    stdin~,
+    stdout~,
+    stderr~,
+    cwd~,
+    no_console_window~,
+    is_orphan~,
+    context~,
+  )
+}

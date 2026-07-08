@@ -13,6 +13,7 @@
 // limitations under the License.
 
 ///|
+#cfg(target="native")
 #valtype
 pub struct Process {
   pid : Int
@@ -20,6 +21,7 @@ pub struct Process {
 }
 
 ///|
+#cfg(target="native")
 pub fn Process::close(self : Process) -> Unit {
   if self.handle is Some(io) {
     io.close()
@@ -27,9 +29,11 @@ pub fn Process::close(self : Process) -> Unit {
 }
 
 ///|
+#cfg(target="native")
 extern "C" fn open_pid_handle(pid : Int) -> @fd_util.Fd = "moonbitlang_async_open_pid_handle"
 
 ///|
+#cfg(target="native")
 pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
   let handle = open_pid_handle(pid)
   let handle = if !@fd_util.fd_is_valid(handle) {
@@ -48,9 +52,100 @@ pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
 }
 
 ///|
+#cfg(target="native")
 #borrow(out)
 extern "C" fn get_process_result(
   handle : @fd_util.Fd,
   pid : Int,
   out : Ref[Int],
 ) -> Int = "moonbitlang_async_get_process_result"
+
+///|
+#cfg(target="wasm")
+#valtype
+pub struct Process {
+  pid : Int
+  priv handle : Ref[@fd_util.Fd]
+}
+
+///|
+#cfg(target="wasm")
+pub fn Process::close(self : Process) -> Unit {
+  let handle = self.handle.val
+  if @fd_util.fd_is_valid(handle) {
+    @fd_util.close(handle, kind=Unknown, context="") catch {
+      _ => ()
+    }
+  }
+  self.handle.val = @fd_util.invalid_fd
+}
+
+///|
+#cfg(target="wasm")
+#unsafe_skip_stub_check
+fn open_pid_handle(pid : Int) -> @fd_util.Fd = "moonbitlang/async" "process/open_pid_handle"
+
+///|
+#cfg(target="wasm")
+fn Process::new(pid : Int, handle : @fd_util.Fd) -> Process {
+  { pid, handle: Ref(handle) }
+}
+
+///|
+#cfg(target="wasm")
+pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
+  ignore(context)
+  Process::new(pid, open_pid_handle(pid))
+}
+
+///|
+#cfg(target="wasm")
+pub async fn spawn(
+  path : @os_string.OsString,
+  args : @c_buffer.Buffer,
+  args_len~ : Int,
+  env~ : @c_buffer.Buffer,
+  env_len~ : Int,
+  inherit_env~ : Bool,
+  stdin~ : @fd_util.Fd,
+  stdout~ : @fd_util.Fd,
+  stderr~ : @fd_util.Fd,
+  cwd~ : @os_string.OsString?,
+  no_console_window~ : Bool,
+  is_orphan~ : Bool,
+  context~ : String,
+) -> Process {
+  let (cwd, has_cwd) = match cwd {
+    None => (@os_string.encode(""), false)
+    Some(cwd) => (cwd, true)
+  }
+  let job = Job::spawn(
+    path,
+    args,
+    args_len~,
+    env~,
+    env_len~,
+    inherit_env~,
+    stdin~,
+    stdout~,
+    stderr~,
+    cwd~,
+    has_cwd~,
+    no_console_window~,
+    is_orphan~,
+  )
+  defer job.0.free()
+  let pid = perform_job_in_worker(job.0, context~)
+  Process::new(pid, job.result_handle())
+}
+
+///|
+#cfg(target="wasm")
+pub async fn Process::wait_pid(self : Process, context~ : String) -> Int {
+  guard curr_loop.val is Some(evloop)
+  let job = Job::wait_for_process(self.handle.val, pid=self.pid)
+  defer job.free()
+  perform_job_in_worker(job, context~, cancel=job_id => {
+    evloop.cancel_job_in_worker(job_id, context~)
+  })
+}

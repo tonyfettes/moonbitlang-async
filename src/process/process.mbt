@@ -398,15 +398,6 @@ pub async fn collect_output_merged(
 }
 
 ///|
-#cfg(target="wasm")
-fn string_bytes_buffer(s : String) -> (@c_buffer.Buffer, Int) {
-  let bytes = @utf8.encode(s)
-  let buffer = @c_buffer.Buffer::new(bytes.length())
-  buffer.blit_from_bytes(src=bytes, len=bytes.length())
-  (buffer, bytes.length())
-}
-
-///|
 priv suberror InvalidProcessArgument {
   InteriorNul(String)
 } derive(Debug)
@@ -486,10 +477,8 @@ async fn raw_spawn(
     None => None
     Some(cwd) => Some(@os_string.encode(cwd))
   }
-  let (args_buffer, args_len) = string_bytes_buffer(serialized_args(args))
-  defer args_buffer.free()
-  let (env, env_len) = string_bytes_buffer(serialized_env(extra_env))
-  defer env.free()
+  let args = @utf8.encode(serialized_args(args))
+  let env = @utf8.encode(serialized_env(extra_env))
   defer {
     if stdin is Some(p) {
       p.after_spawn()
@@ -515,10 +504,10 @@ async fn raw_spawn(
   }
   @event_loop.spawn(
     cmd,
-    args_buffer,
-    args_len~,
+    args,
+    args_len=args.length(),
     env~,
-    env_len~,
+    env_len=env.length(),
     inherit_env~,
     stdin~,
     stdout~,

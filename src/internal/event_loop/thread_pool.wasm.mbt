@@ -535,9 +535,9 @@ priv struct SpawnJob(Job)
 fn JobHandle::spawn(
   path : @os_string.OsString,
   path_len? : Int = path.to_string().length(),
-  args : @c_buffer.Buffer,
+  args : Bytes,
   args_len~ : Int,
-  env~ : @c_buffer.Buffer,
+  env~ : Bytes,
   env_len~ : Int,
   inherit_env~ : Bool,
   stdin~ : @fd_util.Fd,
@@ -553,9 +553,9 @@ fn JobHandle::spawn(
 ///|
 fn Job::spawn(
   path : @os_string.OsString,
-  args : @c_buffer.Buffer,
+  args : Bytes,
   args_len~ : Int,
-  env~ : @c_buffer.Buffer,
+  env~ : Bytes,
   env_len~ : Int,
   inherit_env~ : Bool,
   stdin~ : @fd_util.Fd,

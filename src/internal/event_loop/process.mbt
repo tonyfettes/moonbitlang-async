@@ -102,9 +102,9 @@ pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
 #cfg(target="wasm")
 pub async fn spawn(
   path : @os_string.OsString,
-  args : @c_buffer.Buffer,
+  args : Bytes,
   args_len~ : Int,
-  env~ : @c_buffer.Buffer,
+  env~ : Bytes,
   env_len~ : Int,
   inherit_env~ : Bool,
   stdin~ : @fd_util.Fd,

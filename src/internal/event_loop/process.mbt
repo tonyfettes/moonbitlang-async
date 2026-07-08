@@ -13,7 +13,6 @@
 // limitations under the License.
 
 ///|
-#cfg(target="native")
 #valtype
 pub struct Process {
   pid : Int
@@ -21,7 +20,6 @@ pub struct Process {
 }
 
 ///|
-#cfg(target="native")
 pub fn Process::close(self : Process) -> Unit {
   if self.handle is Some(io) {
     io.close()
@@ -33,7 +31,11 @@ pub fn Process::close(self : Process) -> Unit {
 extern "C" fn open_pid_handle(pid : Int) -> @fd_util.Fd = "moonbitlang_async_open_pid_handle"
 
 ///|
-#cfg(target="native")
+#cfg(target="wasm")
+#unsafe_skip_stub_check
+fn open_pid_handle(pid : Int) -> @fd_util.Fd = "moonbitlang/async" "process/open_pid_handle"
+
+///|
 pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
   let handle = open_pid_handle(pid)
   let handle = if !@fd_util.fd_is_valid(handle) {
@@ -62,40 +64,13 @@ extern "C" fn get_process_result(
 
 ///|
 #cfg(target="wasm")
-#valtype
-pub struct Process {
-  pid : Int
-  priv handle : Ref[@fd_util.Fd]
-}
-
-///|
-#cfg(target="wasm")
-pub fn Process::close(self : Process) -> Unit {
-  let handle = self.handle.val
-  if @fd_util.fd_is_valid(handle) {
-    @fd_util.close(handle, kind=Unknown, context="") catch {
-      _ => ()
-    }
+fn Process::new(pid : Int, handle : @fd_util.Fd) -> Process raise {
+  let handle = if @fd_util.fd_is_valid(handle) {
+    Some(IoHandle::from_fd(handle, kind=Unknown, is_async=false))
+  } else {
+    None
   }
-  self.handle.val = @fd_util.invalid_fd
-}
-
-///|
-#cfg(target="wasm")
-#unsafe_skip_stub_check
-fn open_pid_handle(pid : Int) -> @fd_util.Fd = "moonbitlang/async" "process/open_pid_handle"
-
-///|
-#cfg(target="wasm")
-fn Process::new(pid : Int, handle : @fd_util.Fd) -> Process {
-  { pid, handle: Ref(handle) }
-}
-
-///|
-#cfg(target="wasm")
-pub fn Process::from_pid(pid : Int, context~ : String) -> Process raise {
-  ignore(context)
-  Process::new(pid, open_pid_handle(pid))
+  { pid, handle }
 }
 
 ///|
@@ -143,7 +118,8 @@ pub async fn spawn(
 #cfg(target="wasm")
 pub async fn Process::wait_pid(self : Process, context~ : String) -> Int {
   guard curr_loop.val is Some(evloop)
-  let job = Job::wait_for_process(self.handle.val, pid=self.pid)
+  let handle = if self.handle is Some(io) { io.fd } else { @fd_util.invalid_fd }
+  let job = Job::wait_for_process(handle, pid=self.pid)
   defer job.free()
   perform_job_in_worker(job, context~, cancel=job_id => {
     evloop.cancel_job_in_worker(job_id, context~)

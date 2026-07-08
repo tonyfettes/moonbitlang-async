@@ -23,12 +23,28 @@ extern "C" fn get_signal_by_name(name : Bytes) -> Int = "moonbitlang_async_get_s
 fn get_signal_by_index(index : Int) -> Int = "moonbitlang/async" "signal/get_signal_by_index"
 
 ///|
+#cfg(target="wasm")
+let sigint_index : Int = 0
+
+///|
+#cfg(target="wasm")
+let sigterm_index : Int = 1
+
+///|
+#cfg(target="wasm")
+let sighup_index : Int = 2
+
+///|
+#cfg(target="wasm")
+let sigbreak_index : Int = 3
+
+///|
 #cfg(target="native")
 pub let _SIGINT : Int = get_signal_by_name(b"SIGINT")
 
 ///|
 #cfg(target="wasm")
-pub let _SIGINT : Int = get_signal_by_index(0)
+pub let _SIGINT : Int = get_signal_by_index(sigint_index)
 
 ///|
 #cfg(target="native")
@@ -36,7 +52,7 @@ pub let _SIGTERM : Int = get_signal_by_name(b"SIGTERM")
 
 ///|
 #cfg(target="wasm")
-pub let _SIGTERM : Int = get_signal_by_index(1)
+pub let _SIGTERM : Int = get_signal_by_index(sigterm_index)
 
 ///|
 #cfg(target="native")
@@ -44,7 +60,7 @@ pub let _SIGHUP : Int = get_signal_by_name(b"SIGHUP")
 
 ///|
 #cfg(target="wasm")
-pub let _SIGHUP : Int = get_signal_by_index(2)
+pub let _SIGHUP : Int = get_signal_by_index(sighup_index)
 
 ///|
 #cfg(target="native")
@@ -52,7 +68,7 @@ pub let _SIGBREAK : Int = get_signal_by_name(b"SIGBREAK")
 
 ///|
 #cfg(target="wasm")
-pub let _SIGBREAK : Int = get_signal_by_index(3)
+pub let _SIGBREAK : Int = get_signal_by_index(sigbreak_index)
 
 ///|
 let all_signals : ReadOnlyArray[Int] = [_SIGINT, _SIGTERM, _SIGHUP, _SIGBREAK]

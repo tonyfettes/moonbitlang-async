@@ -602,16 +602,12 @@ fn Job::wait_for_process(handle : @fd_util.Fd, pid~ : Int) -> Job {
 }
 
 ///|
-#cfg(not(platform="windows"))
 #unsafe_skip_stub_check
 #borrow(signals)
-fn JobHandle::sigwait(
-  signals : ReadOnlyArray[Int],
-  signals_len? : Int = signals.length(),
-) -> JobHandle = "moonbitlang/async" "thread_pool/make_sigwait_job"
+fn JobHandle::sigwait(signals : Bytes, signals_len : Int) -> JobHandle = "moonbitlang/async" "thread_pool/make_sigwait_job"
 
 ///|
-#cfg(not(platform="windows"))
 fn Job::sigwait(signals : ReadOnlyArray[Int]) -> Job {
-  Job(JobHandle::sigwait(signals))
+  let signal_bytes = signal_array_bytes(signals)
+  Job(JobHandle::sigwait(signal_bytes, signals.length()))
 }

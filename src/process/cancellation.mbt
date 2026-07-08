@@ -36,12 +36,26 @@ fn kill_process(pid : Int) = "moonbitlang/async" "process/kill"
 pub(all) struct CancellationHandler(async (Int) -> Unit)
 
 ///|
-#cfg(platform="windows")
-let default_signal : @signal.Signal = SIGBREAK
+#cfg(all(target="native", platform="windows"))
+fn default_signal() -> @signal.Signal {
+  SIGBREAK
+}
 
 ///|
-#cfg(not(platform="windows"))
-let default_signal : @signal.Signal = SIGTERM
+#cfg(all(target="native", not(platform="windows")))
+fn default_signal() -> @signal.Signal {
+  SIGTERM
+}
+
+///|
+#cfg(target="wasm")
+fn default_signal() -> @signal.Signal {
+  if @event_loop.platform is Windows {
+    SIGBREAK
+  } else {
+    SIGTERM
+  }
+}
 
 ///|
 /// A process cancellation handler that first try to gracefully stop the process,
@@ -55,7 +69,7 @@ let default_signal : @signal.Signal = SIGTERM
 /// Note that on Windows, `SIGBREAK` is the only signal allowed to be be sent.
 pub fn graceful_cancel(
   timeout~ : Int,
-  signal? : @signal.Signal = default_signal,
+  signal? : @signal.Signal = default_signal(),
 ) -> CancellationHandler {
   pid => {
     if signal.to_int() is code && code >= 0 {

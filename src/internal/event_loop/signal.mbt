@@ -63,6 +63,20 @@ pub suberror KilledBySignal {
 }
 
 ///|
+#cfg(target="wasm")
+fn signal_array_bytes(signals : ReadOnlyArray[Int]) -> Bytes {
+  let bytes = FixedArray::make(signals.length() * 4, b'\x00')
+  for index, signal in signals {
+    let offset = index * 4
+    bytes[offset] = signal.to_byte()
+    bytes[offset + 1] = (signal >> 8).to_byte()
+    bytes[offset + 2] = (signal >> 16).to_byte()
+    bytes[offset + 3] = (signal >> 24).to_byte()
+  }
+  bytes.unsafe_reinterpret_as_bytes()
+}
+
+///|
 #cfg(target="native")
 #borrow(all_signals, signals)
 extern "C" fn set_global_cancellation_signals_ffi(
@@ -75,24 +89,39 @@ extern "C" fn set_global_cancellation_signals_ffi(
 #unsafe_skip_stub_check
 #borrow(all_signals, signals)
 fn set_global_cancellation_signals_ffi(
-  all_signals : ReadOnlyArray[Int],
-  signals : ReadOnlyArray[Int],
-  all_signals_len? : Int = all_signals.length(),
-  signals_len? : Int = signals.length(),
+  all_signals : Bytes,
+  all_signals_len : Int,
+  signals : Bytes,
+  signals_len : Int,
 ) -> Unit = "moonbitlang/async" "signal/set_global_cancellation_signals"
 
 ///|
 let global_signal_handler_initialized : Ref[Bool] = Ref(false)
 
 ///|
+#cfg(target="native")
 pub fn set_global_cancellation_signals(signals : ReadOnlyArray[Int]) -> Unit {
   global_signal_handler_initialized.val = true
   set_global_cancellation_signals_ffi(all_signals, signals)
 }
 
 ///|
-#cfg(all(target="native", not(platform="windows")))
-fn setup_signal_handler() -> @coroutine.Coroutine {
+#cfg(target="wasm")
+pub fn set_global_cancellation_signals(signals : ReadOnlyArray[Int]) -> Unit {
+  global_signal_handler_initialized.val = true
+  let all_signal_bytes = signal_array_bytes(all_signals)
+  let signal_bytes = signal_array_bytes(signals)
+  set_global_cancellation_signals_ffi(
+    all_signal_bytes,
+    all_signals.length(),
+    signal_bytes,
+    signals.length(),
+  )
+}
+
+///|
+#cfg(any(target="wasm", all(target="native", not(platform="windows"))))
+fn setup_sigwait_signal_handler() -> @coroutine.Coroutine {
   if !global_signal_handler_initialized.val {
     set_global_cancellation_signals(all_signals)
   }
@@ -109,8 +138,8 @@ fn setup_signal_handler() -> @coroutine.Coroutine {
 }
 
 ///|
-#cfg(all(target="native", not(platform="windows")))
-async fn EventLoop::terminate_signal_handler(
+#cfg(any(target="wasm", all(target="native", not(platform="windows"))))
+async fn EventLoop::terminate_sigwait_signal_handler(
   evloop : EventLoop,
   sigwait_task : @coroutine.Coroutine,
 ) -> Unit {
@@ -129,13 +158,13 @@ async fn EventLoop::terminate_signal_handler(
 extern "C" fn set_console_control_handler(add : Int) -> Int = "moonbitlang_async_set_console_control_handler"
 
 ///|
-#cfg(all(target="wasm", platform="windows"))
+#cfg(target="wasm")
 #unsafe_skip_stub_check
 fn set_console_control_handler(add : Int) -> Int = "moonbitlang/async" "signal/set_console_control_handler"
 
 ///|
-#cfg(all(target="native", platform="windows"))
-fn setup_signal_handler() -> Unit raise {
+#cfg(any(target="wasm", all(target="native", platform="windows")))
+fn setup_console_control_signal_handler() -> Unit raise {
   if !global_signal_handler_initialized.val {
     set_global_cancellation_signals(all_signals)
   }
@@ -145,10 +174,9 @@ fn setup_signal_handler() -> Unit raise {
 }
 
 ///|
-#cfg(all(target="native", platform="windows"))
-fn EventLoop::terminate_signal_handler(
+#cfg(any(target="wasm", all(target="native", platform="windows")))
+fn EventLoop::terminate_console_control_signal_handler(
   evloop : EventLoop,
-  _ : Unit,
 ) -> Unit raise {
   if set_console_control_handler(0) is 0 {
     @os_error.check_errno("terminate_signal_handler()")
@@ -159,60 +187,62 @@ fn EventLoop::terminate_signal_handler(
 }
 
 ///|
-#cfg(all(target="wasm", not(platform="windows")))
+#cfg(all(target="native", not(platform="windows")))
 fn setup_signal_handler() -> @coroutine.Coroutine {
-  if !global_signal_handler_initialized.val {
-    set_global_cancellation_signals(all_signals)
-  }
-  @coroutine.spawn() <| () => {
-    let context = "sigwait thread"
-    fn cancel(job_id) raise {
-      guard curr_loop.val is Some(evloop)
-      evloop.cancel_job_in_worker(job_id, context~)
-    }
-    let job = Job::sigwait(all_signals)
-    defer job.free()
-    ignore <| perform_job_in_worker(job, context~, cancel~)
-  }
+  setup_sigwait_signal_handler()
 }
 
 ///|
-#cfg(all(target="wasm", platform="windows"))
-fn setup_signal_handler() -> Unit raise {
-  if !global_signal_handler_initialized.val {
-    set_global_cancellation_signals(all_signals)
-  }
-  if set_console_control_handler(1) is 0 {
-    @os_error.check_errno("setup_signal_handler()")
-  }
-}
-
-///|
-#cfg(all(target="wasm", not(platform="windows")))
+#cfg(all(target="native", not(platform="windows")))
 async fn EventLoop::terminate_signal_handler(
   evloop : EventLoop,
   sigwait_task : @coroutine.Coroutine,
 ) -> Unit {
-  sigwait_task.cancel()
-  @coroutine.protect_from_cancel(() => sigwait_task.wait()) catch {
-    @coroutine.Cancelled => ()
-    err => raise err
-  }
-  if evloop.killed_by_signal is Some(signal) {
-    raise KilledBySignal(signal)
-  }
+  evloop.terminate_sigwait_signal_handler(sigwait_task)
 }
 
 ///|
-#cfg(all(target="wasm", platform="windows"))
+#cfg(all(target="native", platform="windows"))
+fn setup_signal_handler() -> Unit raise {
+  setup_console_control_signal_handler()
+}
+
+///|
+#cfg(all(target="native", platform="windows"))
 fn EventLoop::terminate_signal_handler(
   evloop : EventLoop,
   _ : Unit,
 ) -> Unit raise {
-  if set_console_control_handler(0) is 0 {
-    @os_error.check_errno("terminate_signal_handler()")
+  evloop.terminate_console_control_signal_handler()
+}
+
+///|
+#cfg(target="wasm")
+priv enum SignalHandler {
+  Sigwait(@coroutine.Coroutine)
+  ConsoleControl
+}
+
+///|
+#cfg(target="wasm")
+fn setup_signal_handler() -> SignalHandler raise {
+  if platform is Windows {
+    setup_console_control_signal_handler()
+    ConsoleControl
+  } else {
+    Sigwait(setup_sigwait_signal_handler())
   }
-  if evloop.killed_by_signal is Some(signal) {
-    raise KilledBySignal(signal)
+}
+
+///|
+#cfg(target="wasm")
+async fn EventLoop::terminate_signal_handler(
+  evloop : EventLoop,
+  signal_handler : SignalHandler,
+) -> Unit {
+  match signal_handler {
+    Sigwait(sigwait_task) =>
+      evloop.terminate_sigwait_signal_handler(sigwait_task)
+    ConsoleControl => evloop.terminate_console_control_signal_handler()
   }
 }

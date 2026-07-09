@@ -57,6 +57,7 @@ options(
     "network_windows.mbt": [ "native", "wasm" ],
     "event_bus.mbt": [ "native" ],
     "process.mbt": [ "native", "wasm" ],
+    "process.wasm.mbt": [ "wasm" ],
     "event_bus.wasm.mbt": [ "wasm" ],
     "process_unix.mbt": [ "native" ],
     "process_windows.mbt": [ "native" ],

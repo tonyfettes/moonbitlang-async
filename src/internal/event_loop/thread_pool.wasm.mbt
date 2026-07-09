@@ -531,15 +531,13 @@ priv struct SpawnJob(Job)
 
 ///|
 #unsafe_skip_stub_check
-#borrow(path, args, env, cwd)
+#borrow(path, cwd)
 fn JobHandle::spawn_unix(
   path : @os_string.OsString,
   path_len? : Int = path.to_string().length(),
-  args : Bytes,
-  args_len~ : Int,
-  env~ : Bytes,
-  env_len~ : Int,
-  inherit_env~ : Bool,
+  args : UInt64,
+  env~ : UInt64,
+  inherited_env_entry_count~ : Int,
   stdin~ : @fd_util.Fd,
   stdout~ : @fd_util.Fd,
   stderr~ : @fd_util.Fd,
@@ -551,11 +549,9 @@ fn JobHandle::spawn_unix(
 ///|
 fn Job::spawn_unix(
   path : @os_string.OsString,
-  args : Bytes,
-  args_len~ : Int,
-  env~ : Bytes,
-  env_len~ : Int,
-  inherit_env~ : Bool,
+  args : UInt64,
+  env~ : UInt64,
+  inherited_env_entry_count~ : Int,
   stdin~ : @fd_util.Fd,
   stdout~ : @fd_util.Fd,
   stderr~ : @fd_util.Fd,
@@ -567,10 +563,8 @@ fn Job::spawn_unix(
       JobHandle::spawn_unix(
         path,
         args,
-        args_len~,
         env~,
-        env_len~,
-        inherit_env~,
+        inherited_env_entry_count~,
         stdin~,
         stdout~,
         stderr~,
@@ -583,13 +577,11 @@ fn Job::spawn_unix(
 
 ///|
 #unsafe_skip_stub_check
-#borrow(command_line, env, cwd)
+#borrow(command_line, cwd)
 fn JobHandle::spawn_windows(
   command_line : @os_string.OsString,
   command_line_len? : Int = command_line.to_string().length(),
-  env~ : Bytes,
-  env_len~ : Int,
-  inherit_env~ : Bool,
+  env~ : UInt64,
   stdin~ : @fd_util.Fd,
   stdout~ : @fd_util.Fd,
   stderr~ : @fd_util.Fd,
@@ -603,9 +595,7 @@ fn JobHandle::spawn_windows(
 ///|
 fn Job::spawn_windows(
   command_line : @os_string.OsString,
-  env~ : Bytes,
-  env_len~ : Int,
-  inherit_env~ : Bool,
+  env~ : UInt64,
   stdin~ : @fd_util.Fd,
   stdout~ : @fd_util.Fd,
   stderr~ : @fd_util.Fd,
@@ -619,8 +609,6 @@ fn Job::spawn_windows(
       JobHandle::spawn_windows(
         command_line,
         env~,
-        env_len~,
-        inherit_env~,
         stdin~,
         stdout~,
         stderr~,

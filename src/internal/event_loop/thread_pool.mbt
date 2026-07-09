@@ -257,7 +257,6 @@ extern "C" fn Job::spawn(
 ) -> SpawnJob = "moonbitlang_async_make_spawn_job"
 
 ///|
-#borrow(job)
 extern "C" fn SpawnJob::result_handle(job : SpawnJob) -> @fd_util.Fd = "moonbitlang_async_get_spawn_job_result_handle"
 
 ///|

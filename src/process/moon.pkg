@@ -37,6 +37,7 @@ options(
     "redirect_test.mbt": [ "native" ],
     "spawn_in_group_test.mbt": [ "native" ],
     "unix.mbt": [ "native" ],
+    "wasm.mbt": [ "wasm" ],
     "wait_test.mbt": [ "native" ],
     "wasm_test.mbt": [ "wasm" ],
     "windows.mbt": [ "native" ],

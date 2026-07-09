@@ -85,10 +85,44 @@ fn init_ipv6_addr(
 ) -> Unit = "moonbitlang/async" "socket/init_ipv6_addr"
 
 ///|
-fn Addr::new_ipv6(ip : FixedArray[Byte], port : Int, scope_id~ : UInt) -> Addr {
+fn Addr::new_ipv6_unchecked(
+  ip : FixedArray[Byte],
+  port : Int,
+  scope_id~ : UInt,
+) -> Addr {
   let addr = Bytes::make(ipv6_addr_size, 0)
   init_ipv6_addr(addr, ip, port, scope_id~)
   Addr(addr)
+}
+
+///|
+pub fn Addr::new_ipv6(
+  ip : FixedArray[Byte],
+  port : Int,
+  scope_id? : UInt = 0,
+) -> Addr raise InvalidAddr {
+  guard ip.length() == 16 && 0 <= port && port < 65536 else {
+    raise InvalidAddr
+  }
+  Addr::new_ipv6_unchecked(ip, port, scope_id~)
+}
+
+///|
+pub fn Addr::any_ipv6(
+  port? : Int = 0,
+  scope_id? : UInt = 0,
+) -> Addr raise InvalidAddr {
+  Addr::new_ipv6(FixedArray::make(16, b'\x00'), port, scope_id~)
+}
+
+///|
+pub fn Addr::loopback_ipv6(
+  port? : Int = 0,
+  scope_id? : UInt = 0,
+) -> Addr raise InvalidAddr {
+  let ip = FixedArray::make(16, b'\x00')
+  ip[15] = b'\x01'
+  Addr::new_ipv6(ip, port, scope_id~)
 }
 
 ///|
@@ -192,7 +226,7 @@ let ipv4_any : Lazy[Addr] = Lazy(() => Addr::new(0, 0))
 
 ///|
 let ipv6_any : Lazy[Addr] = Lazy(() => {
-  Addr::new_ipv6(FixedArray::make(16, 0), 0, scope_id=0)
+  Addr::new_ipv6_unchecked(FixedArray::make(16, 0), 0, scope_id=0)
 })
 
 ///|
@@ -219,13 +253,37 @@ let ipv6_bytes_offset : Int = Addr::get_ipv6_bytes_offset()
 ///|
 #cfg(target="native")
 #borrow(addr)
-extern "C" fn Addr::scope_id(addr : Addr) -> UInt = "moonbitlang_async_addr_get_ipv6_scope_id"
+extern "C" fn Addr::ipv6_scope_id(addr : Addr) -> UInt = "moonbitlang_async_addr_get_ipv6_scope_id"
 
 ///|
 #cfg(target="wasm")
 #unsafe_skip_stub_check
 #borrow(addr)
-fn Addr::scope_id(addr : Addr, addr_len? : Int = addr.0.length()) -> UInt = "moonbitlang/async" "socket/addr_get_ipv6_scope_id"
+fn Addr::ipv6_scope_id(addr : Addr, addr_len? : Int = addr.0.length()) -> UInt = "moonbitlang/async" "socket/addr_get_ipv6_scope_id"
+
+///|
+pub fn Addr::scope_id(addr : Addr) -> UInt {
+  if addr.is_ipv6() {
+    addr.ipv6_scope_id()
+  } else {
+    0
+  }
+}
+
+///|
+pub fn Addr::ip_bytes(addr : Addr) -> Bytes {
+  if addr.is_ipv6() {
+    addr.0[ipv6_bytes_offset:ipv6_bytes_offset + 16].to_owned()
+  } else {
+    let ip = addr.ip()
+    [
+      ((ip >> 24) & 0xFF).to_byte(),
+      ((ip >> 16) & 0xFF).to_byte(),
+      ((ip >> 8) & 0xFF).to_byte(),
+      (ip & 0xFF).to_byte(),
+    ]
+  }
+}
 
 ///|
 #cfg(target="native")

@@ -13,6 +13,59 @@
 // limitations under the License.
 
 ///|
+fn sample_ipv6_bytes() -> FixedArray[Byte] {
+  let ip = FixedArray::make(16, b'\x00')
+  ip[0] = b'\x20'
+  ip[1] = b'\x01'
+  ip[2] = b'\x0D'
+  ip[3] = b'\xB8'
+  ip[15] = b'\x01'
+  ip
+}
+
+///|
+test "Construct IPv6 address" {
+  let addr = @socket.Addr::new_ipv6(sample_ipv6_bytes(), 53)
+  assert_eq(addr.to_string(), "[2001:db8::1]:53")
+  assert_eq(addr.is_ipv6(), true)
+  assert_eq(addr.port(), 53)
+  assert_eq(addr.scope_id(), 0)
+  assert_eq(
+    addr.ip_bytes(),
+    b"\x20\x01\x0D\xB8\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01",
+  )
+  let scoped_addr = @socket.Addr::new_ipv6(
+    sample_ipv6_bytes(),
+    5353,
+    scope_id=7,
+  )
+  assert_eq(scoped_addr.scope_id(), 7)
+}
+
+///|
+test "Construct IPv6 special addresses" {
+  assert_eq(@socket.Addr::any_ipv6().to_string(), "[::]:0")
+  assert_eq(@socket.Addr::any_ipv6(port=5353).to_string(), "[::]:5353")
+  assert_eq(@socket.Addr::loopback_ipv6(port=8080).to_string(), "[::1]:8080")
+}
+
+///|
+test "Read address bytes" {
+  let addr = @socket.Addr::new(0x7F000001, 80)
+  assert_eq(addr.ip_bytes(), b"\x7F\x00\x00\x01")
+  assert_eq(addr.scope_id(), 0)
+}
+
+///|
+test "Construct invalid IPv6 address" {
+  @test.assert_raise(() => {
+    @socket.Addr::new_ipv6(FixedArray::make(15, b'\x00'), 53)
+  })
+  @test.assert_raise(() => @socket.Addr::new_ipv6(sample_ipv6_bytes(), -1))
+  @test.assert_raise(() => @socket.Addr::new_ipv6(sample_ipv6_bytes(), 65536))
+}
+
+///|
 test "Parse IPv4 address" {
   assert_eq(@socket.Addr::parse("127.0.0.1:8080").to_string(), "127.0.0.1:8080")
   assert_eq(@socket.Addr::parse("0.0.0.0:8080").to_string(), "0.0.0.0:8080")

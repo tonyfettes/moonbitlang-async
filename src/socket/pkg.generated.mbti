@@ -21,13 +21,18 @@ pub impl Show for ResolveHostnameError
 
 // Types and methods
 type Addr derive(Compare, Eq, Hash)
+pub fn Addr::any_ipv6(port? : Int, scope_id? : UInt) -> Self raise InvalidAddr
 pub fn Addr::ip(Self) -> UInt
+pub fn Addr::ip_bytes(Self) -> Bytes
 pub fn Addr::is_ipv6(Self) -> Bool
 pub fn Addr::is_multicast(Self) -> Bool
+pub fn Addr::loopback_ipv6(port? : Int, scope_id? : UInt) -> Self raise InvalidAddr
 pub fn Addr::new(UInt, Int) -> Self
+pub fn Addr::new_ipv6(FixedArray[Byte], Int, scope_id? : UInt) -> Self raise InvalidAddr
 pub fn Addr::parse(String) -> Self raise
 pub fn Addr::port(Self) -> Int
 pub async fn Addr::resolve(String, port~ : Int, protocol? : IpProtocolPreference) -> Self
+pub fn Addr::scope_id(Self) -> UInt
 pub impl Show for Addr
 pub impl @debug.Debug for Addr
 

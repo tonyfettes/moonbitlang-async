@@ -15,6 +15,9 @@
  */
 
 #include <stdint.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 #include <moonbit.h>
 
 #ifdef _WIN32
@@ -26,17 +29,18 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <ws2tcpip.h>
-#include <stddef.h>
+#include <iphlpapi.h>
+#include <wchar.h>
+
+#pragma comment(lib, "Iphlpapi.lib")
 
 #else
 
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <fcntl.h>
 #include <stdio.h>
-#include <string.h>
 #include <errno.h>
 #include <time.h>
 #include <dirent.h>
@@ -46,6 +50,8 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <net/if.h>
+#include <ifaddrs.h>
 #include <sys/stat.h>
 #include <sys/file.h>
 #include <sys/wait.h>
@@ -2626,6 +2632,563 @@ struct getaddrinfo_job *moonbitlang_async_make_getaddrinfo_job(char *hostname) {
 addrinfo_t *moonbitlang_async_get_getaddrinfo_result(struct getaddrinfo_job *job) {
   job->result_fetched = 1;
   return job->result;
+}
+
+// ===== network interfaces job, enumerate a point-in-time interface snapshot =====
+
+#ifdef _WIN32
+typedef wchar_t network_interface_name_char_t;
+#else
+typedef char network_interface_name_char_t;
+#endif
+
+struct network_interface_address {
+  struct sockaddr_storage address;
+  int32_t prefix_length;
+};
+
+struct network_interface_entry {
+  network_interface_name_char_t *name;
+  uint32_t ipv4_index;
+  uint32_t ipv6_index;
+  int32_t is_up;
+  int32_t is_loopback;
+  int32_t supports_multicast;
+  int32_t address_count;
+  struct network_interface_address *addresses;
+};
+
+struct network_interface_snapshot_data {
+  int32_t interface_count;
+  struct network_interface_entry *interfaces;
+};
+
+struct network_interface_snapshot {
+  struct network_interface_snapshot_data *data;
+};
+
+static
+void free_network_interface_snapshot_data(
+  struct network_interface_snapshot_data *snapshot
+) {
+  if (!snapshot) return;
+  for (int32_t i = 0; i < snapshot->interface_count; i++) {
+    free(snapshot->interfaces[i].name);
+    free(snapshot->interfaces[i].addresses);
+  }
+  free(snapshot->interfaces);
+  free(snapshot);
+}
+
+static
+void finalize_network_interface_snapshot(void *object) {
+  struct network_interface_snapshot *snapshot =
+    (struct network_interface_snapshot*)object;
+  free_network_interface_snapshot_data(snapshot->data);
+}
+
+MOONBIT_FFI_EXPORT
+struct network_interface_snapshot *moonbitlang_async_make_network_interface_snapshot() {
+  struct network_interface_snapshot *snapshot =
+    (struct network_interface_snapshot*)moonbit_make_external_object(
+      finalize_network_interface_snapshot,
+      sizeof(struct network_interface_snapshot_data*)
+    );
+  snapshot->data = NULL;
+  return snapshot;
+}
+
+static
+network_interface_name_char_t *copy_network_interface_name(
+  const network_interface_name_char_t *name
+) {
+#ifdef _WIN32
+  if (!name) name = L"";
+  size_t length = wcslen(name) + 1;
+#else
+  if (!name) name = "";
+  size_t length = strlen(name) + 1;
+#endif
+  network_interface_name_char_t *copy =
+    (network_interface_name_char_t*)malloc(
+      length * sizeof(network_interface_name_char_t)
+    );
+  if (copy) {
+    memcpy(copy, name, length * sizeof(network_interface_name_char_t));
+  }
+  return copy;
+}
+
+#ifndef _WIN32
+static
+int network_interface_name_equal(
+  const network_interface_name_char_t *left,
+  const network_interface_name_char_t *right
+) {
+  return strcmp(left, right) == 0;
+}
+#endif
+
+static
+struct network_interface_entry *append_network_interface(
+  struct network_interface_snapshot_data *snapshot,
+  const network_interface_name_char_t *name
+) {
+  int32_t next_count = snapshot->interface_count + 1;
+  struct network_interface_entry *interfaces =
+    (struct network_interface_entry*)realloc(
+      snapshot->interfaces,
+      sizeof(struct network_interface_entry) * next_count
+    );
+  if (!interfaces) return NULL;
+  snapshot->interfaces = interfaces;
+
+  struct network_interface_entry *entry =
+    &snapshot->interfaces[snapshot->interface_count];
+  memset(entry, 0, sizeof(*entry));
+  entry->name = copy_network_interface_name(name);
+  if (!entry->name) return NULL;
+  snapshot->interface_count = next_count;
+  return entry;
+}
+
+#ifndef _WIN32
+static
+struct network_interface_entry *find_network_interface(
+  struct network_interface_snapshot_data *snapshot,
+  const network_interface_name_char_t *name
+) {
+  for (int32_t i = 0; i < snapshot->interface_count; i++) {
+    if (network_interface_name_equal(snapshot->interfaces[i].name, name)) {
+      return &snapshot->interfaces[i];
+    }
+  }
+  return NULL;
+}
+#endif
+
+#ifndef _WIN32
+static
+int32_t prefix_length_from_bytes(const uint8_t *bytes, size_t length) {
+  int32_t prefix_length = 0;
+  int saw_zero = 0;
+  for (size_t i = 0; i < length; i++) {
+    for (int bit = 7; bit >= 0; bit--) {
+      int is_set = (bytes[i] & (1u << bit)) != 0;
+      if (is_set) {
+        if (saw_zero) return -1;
+        prefix_length++;
+      } else {
+        saw_zero = 1;
+      }
+    }
+  }
+  return prefix_length;
+}
+
+static
+int32_t prefix_length_from_netmask(
+  const struct sockaddr *netmask,
+  int family
+) {
+  if (!netmask) return 0;
+  if (family == AF_INET) {
+    const struct sockaddr_in *addr = (const struct sockaddr_in*)netmask;
+    return prefix_length_from_bytes(
+      (const uint8_t*)&addr->sin_addr,
+      sizeof(addr->sin_addr)
+    );
+  }
+  if (family == AF_INET6) {
+    const struct sockaddr_in6 *addr = (const struct sockaddr_in6*)netmask;
+    return prefix_length_from_bytes(
+      (const uint8_t*)&addr->sin6_addr,
+      sizeof(addr->sin6_addr)
+    );
+  }
+  return -1;
+}
+#endif
+
+static
+int append_network_interface_address(
+  struct network_interface_entry *entry,
+  const struct sockaddr *address,
+  int32_t prefix_length
+) {
+  if (!address || (address->sa_family != AF_INET && address->sa_family != AF_INET6)) {
+    return 1;
+  }
+
+  int32_t next_count = entry->address_count + 1;
+  struct network_interface_address *addresses =
+    (struct network_interface_address*)realloc(
+      entry->addresses,
+      sizeof(struct network_interface_address) * next_count
+    );
+  if (!addresses) return 0;
+  entry->addresses = addresses;
+
+  struct network_interface_address *output =
+    &entry->addresses[entry->address_count];
+  memset(output, 0, sizeof(*output));
+  output->prefix_length = prefix_length;
+  if (address->sa_family == AF_INET) {
+    struct sockaddr_in *ipv4 = (struct sockaddr_in*)&output->address;
+    memcpy(ipv4, address, sizeof(*ipv4));
+    ipv4->sin_port = 0;
+  } else {
+    struct sockaddr_in6 *ipv6 = (struct sockaddr_in6*)&output->address;
+    memcpy(ipv6, address, sizeof(*ipv6));
+    ipv6->sin6_port = 0;
+    if (IN6_IS_ADDR_LINKLOCAL(&ipv6->sin6_addr)) {
+      ipv6->sin6_scope_id = entry->ipv6_index;
+    }
+  }
+  entry->address_count = next_count;
+  return 1;
+}
+
+#ifdef _WIN32
+
+static
+struct network_interface_snapshot_data *enumerate_network_interfaces(
+  int32_t *error
+) {
+  struct network_interface_snapshot_data *snapshot =
+    (struct network_interface_snapshot_data*)calloc(1, sizeof(*snapshot));
+  if (!snapshot) {
+    *error = ERROR_NOT_ENOUGH_MEMORY;
+    return NULL;
+  }
+
+  ULONG flags =
+    GAA_FLAG_SKIP_ANYCAST |
+    GAA_FLAG_SKIP_MULTICAST |
+    GAA_FLAG_SKIP_DNS_SERVER |
+    GAA_FLAG_INCLUDE_PREFIX;
+  ULONG buffer_length = 16 * 1024;
+  IP_ADAPTER_ADDRESSES *adapters = NULL;
+  ULONG result = ERROR_BUFFER_OVERFLOW;
+  for (int attempt = 0; attempt < 3 && result == ERROR_BUFFER_OVERFLOW; attempt++) {
+    IP_ADAPTER_ADDRESSES *next =
+      (IP_ADAPTER_ADDRESSES*)realloc(adapters, buffer_length);
+    if (!next) {
+      free(adapters);
+      free_network_interface_snapshot_data(snapshot);
+      *error = ERROR_NOT_ENOUGH_MEMORY;
+      return NULL;
+    }
+    adapters = next;
+    result = GetAdaptersAddresses(
+      AF_UNSPEC,
+      flags,
+      NULL,
+      adapters,
+      &buffer_length
+    );
+  }
+
+  if (result == ERROR_NO_DATA) {
+    free(adapters);
+    return snapshot;
+  }
+  if (result != NO_ERROR) {
+    free(adapters);
+    free_network_interface_snapshot_data(snapshot);
+    *error = result;
+    return NULL;
+  }
+
+  for (IP_ADAPTER_ADDRESSES *adapter = adapters; adapter; adapter = adapter->Next) {
+    struct network_interface_entry *entry =
+      append_network_interface(snapshot, adapter->FriendlyName);
+    if (!entry) {
+      free(adapters);
+      free_network_interface_snapshot_data(snapshot);
+      *error = ERROR_NOT_ENOUGH_MEMORY;
+      return NULL;
+    }
+    entry->ipv4_index = adapter->IfIndex;
+    entry->ipv6_index = adapter->Ipv6IfIndex;
+    entry->is_up = adapter->OperStatus == IfOperStatusUp;
+    entry->is_loopback = adapter->IfType == IF_TYPE_SOFTWARE_LOOPBACK;
+    entry->supports_multicast = !(adapter->Flags & IP_ADAPTER_NO_MULTICAST);
+
+    for (
+      IP_ADAPTER_UNICAST_ADDRESS *unicast = adapter->FirstUnicastAddress;
+      unicast;
+      unicast = unicast->Next
+    ) {
+      const struct sockaddr *address = unicast->Address.lpSockaddr;
+      if (!address) continue;
+      int32_t max_prefix_length = address->sa_family == AF_INET ? 32 : 128;
+      if (
+        (address->sa_family != AF_INET && address->sa_family != AF_INET6) ||
+        unicast->OnLinkPrefixLength > max_prefix_length
+      ) {
+        continue;
+      }
+      if (!append_network_interface_address(
+        entry,
+        address,
+        unicast->OnLinkPrefixLength
+      )) {
+        free(adapters);
+        free_network_interface_snapshot_data(snapshot);
+        *error = ERROR_NOT_ENOUGH_MEMORY;
+        return NULL;
+      }
+    }
+  }
+
+  free(adapters);
+  return snapshot;
+}
+
+#else
+
+static
+struct network_interface_snapshot_data *enumerate_network_interfaces(
+  int32_t *error
+) {
+  struct network_interface_snapshot_data *snapshot =
+    (struct network_interface_snapshot_data*)calloc(1, sizeof(*snapshot));
+  if (!snapshot) {
+    *error = ENOMEM;
+    return NULL;
+  }
+
+  struct ifaddrs *interfaces = NULL;
+  if (getifaddrs(&interfaces) < 0) {
+    *error = errno;
+    free_network_interface_snapshot_data(snapshot);
+    return NULL;
+  }
+
+  for (struct ifaddrs *interface = interfaces; interface; interface = interface->ifa_next) {
+    if (!interface->ifa_name) continue;
+    struct network_interface_entry *entry =
+      find_network_interface(snapshot, interface->ifa_name);
+    if (!entry) {
+      entry = append_network_interface(snapshot, interface->ifa_name);
+      if (!entry) {
+        freeifaddrs(interfaces);
+        free_network_interface_snapshot_data(snapshot);
+        *error = ENOMEM;
+        return NULL;
+      }
+      uint32_t index = if_nametoindex(interface->ifa_name);
+      entry->ipv4_index = index;
+      entry->ipv6_index = index;
+    }
+    entry->is_up = (interface->ifa_flags & IFF_UP) != 0;
+    entry->is_loopback = (interface->ifa_flags & IFF_LOOPBACK) != 0;
+    entry->supports_multicast = (interface->ifa_flags & IFF_MULTICAST) != 0;
+
+    if (!interface->ifa_addr) continue;
+    int family = interface->ifa_addr->sa_family;
+    if (family != AF_INET && family != AF_INET6) continue;
+    int32_t prefix_length = prefix_length_from_netmask(
+      interface->ifa_netmask,
+      family
+    );
+    if (prefix_length < 0) continue;
+    if (!append_network_interface_address(
+      entry,
+      interface->ifa_addr,
+      prefix_length
+    )) {
+      freeifaddrs(interfaces);
+      free_network_interface_snapshot_data(snapshot);
+      *error = ENOMEM;
+      return NULL;
+    }
+  }
+
+  freeifaddrs(interfaces);
+  return snapshot;
+}
+
+#endif
+
+struct network_interfaces_job {
+  struct job job;
+  struct network_interface_snapshot *output;
+};
+
+static
+void free_network_interfaces_job(void *object) {
+  struct network_interfaces_job *job =
+    (struct network_interfaces_job*)object;
+  moonbit_decref(job->output);
+}
+
+static
+void network_interfaces_job_worker(struct job *base) {
+  struct network_interfaces_job *job =
+    (struct network_interfaces_job*)base;
+  int32_t error = 0;
+  struct network_interface_snapshot_data *snapshot =
+    enumerate_network_interfaces(&error);
+  if (!snapshot) {
+    base->err = error;
+    return;
+  }
+  job->output->data = snapshot;
+}
+
+MOONBIT_FFI_EXPORT
+struct network_interfaces_job *moonbitlang_async_make_network_interfaces_job(
+  struct network_interface_snapshot *output
+) {
+  struct network_interfaces_job *job = MAKE_JOB(network_interfaces);
+  job->output = output;
+  return job;
+}
+
+static
+struct network_interface_entry *network_interface_snapshot_get_interface(
+  struct network_interface_snapshot *snapshot,
+  int32_t index
+) {
+  if (
+    !snapshot ||
+    !snapshot->data ||
+    index < 0 ||
+    index >= snapshot->data->interface_count
+  ) {
+    return NULL;
+  }
+  return &snapshot->data->interfaces[index];
+}
+
+static
+struct network_interface_address *network_interface_snapshot_get_address(
+  struct network_interface_snapshot *snapshot,
+  int32_t interface_index,
+  int32_t address_index
+) {
+  struct network_interface_entry *entry =
+    network_interface_snapshot_get_interface(snapshot, interface_index);
+  if (!entry || address_index < 0 || address_index >= entry->address_count) {
+    return NULL;
+  }
+  return &entry->addresses[address_index];
+}
+
+MOONBIT_FFI_EXPORT
+int32_t moonbitlang_async_network_interface_snapshot_length(
+  struct network_interface_snapshot *snapshot
+) {
+  return snapshot && snapshot->data ? snapshot->data->interface_count : 0;
+}
+
+MOONBIT_FFI_EXPORT
+network_interface_name_char_t *moonbitlang_async_network_interface_snapshot_name(
+  struct network_interface_snapshot *snapshot,
+  int32_t index
+) {
+  struct network_interface_entry *entry =
+    network_interface_snapshot_get_interface(snapshot, index);
+#ifdef _WIN32
+  return entry ? entry->name : L"";
+#else
+  return entry ? entry->name : "";
+#endif
+}
+
+#define NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR(name, field) \
+  MOONBIT_FFI_EXPORT \
+  int32_t moonbitlang_async_network_interface_snapshot_##name( \
+    struct network_interface_snapshot *snapshot, \
+    int32_t index \
+  ) { \
+    struct network_interface_entry *entry = \
+      network_interface_snapshot_get_interface(snapshot, index); \
+    return entry ? entry->field : 0; \
+  }
+
+NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR(is_up, is_up)
+NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR(is_loopback, is_loopback)
+NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR(supports_multicast, supports_multicast)
+NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR(address_count, address_count)
+
+#undef NETWORK_INTERFACE_SNAPSHOT_FIELD_ACCESSOR
+
+MOONBIT_FFI_EXPORT
+uint32_t moonbitlang_async_network_interface_snapshot_ipv4_index(
+  struct network_interface_snapshot *snapshot,
+  int32_t index
+) {
+  struct network_interface_entry *entry =
+    network_interface_snapshot_get_interface(snapshot, index);
+  return entry ? entry->ipv4_index : 0;
+}
+
+MOONBIT_FFI_EXPORT
+uint32_t moonbitlang_async_network_interface_snapshot_ipv6_index(
+  struct network_interface_snapshot *snapshot,
+  int32_t index
+) {
+  struct network_interface_entry *entry =
+    network_interface_snapshot_get_interface(snapshot, index);
+  return entry ? entry->ipv6_index : 0;
+}
+
+MOONBIT_FFI_EXPORT
+int32_t moonbitlang_async_network_interface_snapshot_address_size(
+  struct network_interface_snapshot *snapshot,
+  int32_t interface_index,
+  int32_t address_index
+) {
+  struct network_interface_address *address =
+    network_interface_snapshot_get_address(
+      snapshot,
+      interface_index,
+      address_index
+    );
+  if (!address) return 0;
+  if (address->address.ss_family == AF_INET) return sizeof(struct sockaddr_in);
+  if (address->address.ss_family == AF_INET6) return sizeof(struct sockaddr_in6);
+  return 0;
+}
+
+MOONBIT_FFI_EXPORT
+void moonbitlang_async_network_interface_snapshot_fill_address(
+  struct network_interface_snapshot *snapshot,
+  int32_t interface_index,
+  int32_t address_index,
+  void *output
+) {
+  struct network_interface_address *address =
+    network_interface_snapshot_get_address(
+      snapshot,
+      interface_index,
+      address_index
+    );
+  if (!address) return;
+  size_t length = address->address.ss_family == AF_INET
+    ? sizeof(struct sockaddr_in)
+    : sizeof(struct sockaddr_in6);
+  if (Moonbit_array_length(output) >= length) {
+    memcpy(output, &address->address, length);
+  }
+}
+
+MOONBIT_FFI_EXPORT
+int32_t moonbitlang_async_network_interface_snapshot_prefix_length(
+  struct network_interface_snapshot *snapshot,
+  int32_t interface_index,
+  int32_t address_index
+) {
+  struct network_interface_address *address =
+    network_interface_snapshot_get_address(
+      snapshot,
+      interface_index,
+      address_index
+    );
+  return address ? address->prefix_length : 0;
 }
 
 #ifdef _WIN32

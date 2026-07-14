@@ -52,6 +52,7 @@ options(
     "io_result.wasm.mbt": [ "wasm" ],
     "missing_close_test.mbt": [ "native" ],
     "network.mbt": [ "native", "wasm" ],
+    "network_interface.mbt": [ "native" ],
     "network.wasm.mbt": [ "wasm" ],
     "network_unix.mbt": [ "native", "wasm" ],
     "network_windows.mbt": [ "native", "wasm" ],

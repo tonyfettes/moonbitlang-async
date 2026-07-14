@@ -39,6 +39,8 @@ pub async fn kind_of_fd(Int, context~ : String) -> @fd_util.FileKind
 
 pub async fn mkdir(StringView, mode~ : Int, context~ : String) -> Unit
 
+pub async fn network_interfaces(context~ : String) -> NetworkInterfaceSnapshot
+
 pub async fn open(StringView, Int, create~ : Int, append~ : Bool, sync~ : Int, mode~ : Int, context~ : String) -> (IoHandle, FileIdentity)
 
 pub let platform : Platform
@@ -109,6 +111,19 @@ pub async fn IoHandle::sendto(Self, Bytes, offset~ : Int, len~ : Int, addr~ : By
 pub async fn IoHandle::wait_read(Self) -> Unit
 pub async fn IoHandle::write(Self, Bytes, offset~ : Int, len~ : Int, context~ : String) -> Int
 pub async fn IoHandle::write_at(Self, Bytes, offset~ : Int, len~ : Int, position~ : Int64, context~ : String) -> Unit
+
+pub type NetworkInterfaceSnapshot
+pub fn NetworkInterfaceSnapshot::address_count(Self, Int) -> Int
+pub fn NetworkInterfaceSnapshot::address_size(Self, Int, Int) -> Int
+pub fn NetworkInterfaceSnapshot::fill_address(Self, Int, Int, Bytes) -> Unit
+pub fn NetworkInterfaceSnapshot::ipv4_index(Self, Int) -> UInt
+pub fn NetworkInterfaceSnapshot::ipv6_index(Self, Int) -> UInt
+pub fn NetworkInterfaceSnapshot::is_loopback(Self, Int) -> Bool
+pub fn NetworkInterfaceSnapshot::is_up(Self, Int) -> Bool
+pub fn NetworkInterfaceSnapshot::length(Self) -> Int
+pub fn NetworkInterfaceSnapshot::name(Self, Int) -> String
+pub fn NetworkInterfaceSnapshot::prefix_length(Self, Int, Int) -> Int
+pub fn NetworkInterfaceSnapshot::supports_multicast(Self, Int) -> Bool
 
 pub(all) enum Platform {
   Linux

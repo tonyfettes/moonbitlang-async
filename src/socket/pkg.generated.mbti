@@ -36,6 +36,11 @@ pub fn Addr::scope_id(Self) -> UInt
 pub impl Show for Addr
 pub impl @debug.Debug for Addr
 
+pub struct InterfaceAddress {
+  address : Addr
+  prefix_len : Int
+} derive(Eq, @debug.Debug)
+
 pub(all) enum IpProtocolPreference {
   OnlyV4
   OnlyV6
@@ -45,6 +50,17 @@ pub(all) enum IpProtocolPreference {
 } derive(@debug.Debug)
 #deprecated
 pub impl Show for IpProtocolPreference
+
+pub struct NetworkInterface {
+  name : String
+  ipv4_index : UInt?
+  ipv6_index : UInt?
+  is_up : Bool
+  is_loopback : Bool
+  supports_multicast : Bool
+  addresses : ReadOnlyArray[InterfaceAddress]
+} derive(Eq, @debug.Debug)
+pub async fn NetworkInterface::list() -> ReadOnlyArray[Self]
 
 pub struct Tcp {
   addr : Addr
